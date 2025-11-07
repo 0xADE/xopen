@@ -33,7 +33,7 @@ type UI struct {
 	applications []exe.Application
 	selectedIdx  int
 	status       string
-	statusMutex  sync.RWMutex
+	statusMx     sync.RWMutex
 	initialized  bool
 
 	// Filter debouncing
@@ -127,9 +127,10 @@ func (ui *UI) updateApplications(query string) {
 }
 
 func (ui *UI) setStatus(msg string) {
-	ui.statusMutex.Lock()
+	fmt.Println(msg) // NOTE on debug
+	ui.statusMx.Lock()
 	ui.status = msg
-	ui.statusMutex.Unlock()
+	ui.statusMx.Unlock()
 	if ui.window != nil {
 		ui.window.Invalidate()
 	}
@@ -166,17 +167,16 @@ func (ui *UI) runSelected() {
 	}
 
 	app := ui.applications[ui.selectedIdx]
-	err := ui.client.Run(app.ID)
-	if err != nil {
-		ui.setStatus(fmt.Sprintf("Run error: %v", err))
-		return
-	}
-
 	ui.setStatus(fmt.Sprintf("Running: %s", app.Name))
-	// Close window after a short delay
+
+	// Run client.Run() asynchronously to avoid blocking UI event loop
 	go func() {
-		time.Sleep(200 * time.Millisecond)
-		os.Exit(0)
+		err := ui.client.Run(app.ID)
+		if err != nil {
+			ui.setStatus(fmt.Sprintf("Run error: %v", err))
+		} else {
+			ui.setStatus(fmt.Sprintf("Launched: %s", app.Name))
+		}
 	}()
 }
 
@@ -334,7 +334,7 @@ func (ui *UI) layout(gtx layout.Context) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				editor := material.Editor(ui.theme, &ui.filterEditor, "Filter applications...")
+				editor := material.Editor(ui.theme, &ui.filterEditor, "Filter by name...")
 				editor.TextSize = unit.Sp(20)
 				return editor.Layout(gtx)
 			})
@@ -344,9 +344,9 @@ func (ui *UI) layout(gtx layout.Context) layout.Dimensions {
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				ui.statusMutex.RLock()
+				ui.statusMx.RLock()
 				status := ui.status
-				ui.statusMutex.RUnlock()
+				ui.statusMx.RUnlock()
 				label := material.Body2(ui.theme, status)
 				label.Color = color.NRGBA{R: 170, G: 170, B: 170, A: 255}
 				return label.Layout(gtx)
