@@ -100,11 +100,11 @@ func (ui *UI) updateApplications(query string) {
 	var apps []exe.Application
 	var err error
 
-	if query == "" {
-		err = ui.client.ResetFilters()
-	} else {
-		err = ui.client.SetFilterName(query)
-	}
+	// if query == "" {
+	// 	err = ui.client.ResetFilters()
+	// } else {
+	err = ui.client.SetFilterName(query)
+	//	}
 	if err != nil {
 		ui.setStatus(fmt.Sprintf("Filter error: %v", err))
 		return
@@ -160,7 +160,22 @@ func (ui *UI) moveSelectionDown() {
 	}
 }
 
-func (ui *UI) runSelected() {
+// clearFilter clears the current filter string
+func (ui *UI) clearFilter() {
+	ui.filterEditor.SetText("")
+	ui.query = ""
+	select {
+	case ui.queryInput <- "":
+	default:
+		// Channel full, skip this update
+	}
+	if ui.window != nil {
+		ui.window.Invalidate()
+	}
+}
+
+// runSelected runs the selected application with specified options
+func (ui *UI) runSelected(exit bool, terminal bool) {
 	if ui.selectedIdx >= len(ui.applications) {
 		ui.setStatus("No application selected")
 		return
@@ -169,15 +184,30 @@ func (ui *UI) runSelected() {
 	app := ui.applications[ui.selectedIdx]
 	ui.setStatus(fmt.Sprintf("Running: %s", app.Name))
 
-	// Run client.Run() asynchronously to avoid blocking UI event loop
-	go func() {
-		err := ui.client.Run(app.ID)
-		if err != nil {
-			ui.setStatus(fmt.Sprintf("Run error: %v", err))
-		} else {
-			ui.setStatus(fmt.Sprintf("Launched: %s", app.Name))
-		}
-	}()
+	if exit {
+		fmt.Println("exit...")
+		ui.clientRun(app, terminal)
+		fmt.Println("here exit...")
+		os.Exit(0)
+	} else {
+		fmt.Println("wait...")
+		go ui.clientRun(app, terminal)
+	}
+}
+
+// Run client.Run() or client.RunInTerminal() asynchronously to avoid blocking UI event loop
+func (ui *UI) clientRun(app exe.Application, terminal bool) {
+	var err error
+	if terminal {
+		err = ui.client.RunInTerminal(app.ID)
+	} else {
+		err = ui.client.Run(app.ID)
+	}
+	if err != nil {
+		ui.setStatus(fmt.Sprintf("Run error: %v", err))
+	} else {
+		ui.setStatus(fmt.Sprintf("Launched: %s", app.Name))
+	}
 }
 
 // Run starts the UI application loop
@@ -239,7 +269,8 @@ func (ui *UI) loop() error {
 				key.Filter{Name: key.NameEscape},
 				key.Filter{Name: key.NameUpArrow},
 				key.Filter{Name: key.NameDownArrow},
-				key.Filter{Name: key.NameReturn},
+				key.Filter{Name: key.NameReturn, Optional: key.ModShift | key.ModAlt},
+				key.Filter{Name: "M", Required: key.ModCtrl},
 			)
 
 			for {
@@ -264,7 +295,29 @@ func (ui *UI) loop() error {
 							ui.keyRepeatName = key.NameDownArrow
 							ui.keyRepeatStart = time.Now()
 						case key.NameReturn:
-							ui.runSelected()
+							// Handle Enter with modifiers
+							hasAlt := kev.Modifiers.Contain(key.ModAlt)
+							hasShift := kev.Modifiers.Contain(key.ModShift)
+							if hasAlt && hasShift {
+								// Alt+Shift+Enter: Run in terminal, don't exit, clear filter
+								ui.runSelected(false, true)
+								ui.clearFilter()
+							} else if hasShift {
+								// Shift+Enter: Run in terminal, exit
+								ui.runSelected(true, true)
+							} else if hasAlt {
+								// Alt+Enter: Run, don't exit, clear filter
+								ui.runSelected(false, false)
+								ui.clearFilter()
+							} else {
+								// Enter: Run and exit
+								ui.runSelected(true, false)
+							}
+						case "M":
+							// Ctrl+M is alternative to Enter
+							if kev.Modifiers.Contain(key.ModCtrl) {
+								ui.runSelected(true, false)
+							}
 						}
 					case key.Release:
 						// Stop key repeat when key is released
@@ -319,7 +372,7 @@ func (ui *UI) loop() error {
 						// Channel full, skip this update
 					}
 				case widget.SubmitEvent:
-					ui.runSelected()
+					ui.runSelected(true, false)
 				}
 			}
 
@@ -389,7 +442,7 @@ func (ui *UI) layoutApplicationList(gtx layout.Context) layout.Dimensions {
 		})
 		for clickable.Clicked(gtx) {
 			ui.selectedIdx = index
-			ui.runSelected()
+			ui.runSelected(true, false)
 		}
 
 		return dims
