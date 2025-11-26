@@ -2,6 +2,10 @@
 
 A GUI launcher for [ade-exe-ctld](https://github.com/0xADE/ade-ctld), built with [Go](https://go.dev) and the [Gio](https://gioui.org) UI toolkit.
 
+## Status
+
+**In active development and not suitable for use by end users!**
+
 ## Features
 
 - Fast search (by filter) and navigation of indexed applications
